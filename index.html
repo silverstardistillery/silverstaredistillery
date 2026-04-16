@@ -485,6 +485,14 @@
       max-width: 100vw;
     }
 
+    body.scroll-lock {
+      overflow: hidden !important;
+      position: fixed;
+      left: 0;
+      right: 0;
+      width: 100%;
+    }
+
     /* ===== AGE GATE ===== */
     #age-gate {
       position: fixed;
@@ -657,6 +665,7 @@
       display: flex;
       gap: 3rem;
       list-style: none;
+      overscroll-behavior: contain;
     }
 
     .nav-links a {
@@ -679,6 +688,16 @@
       gap: 5px;
       cursor: pointer;
       padding: 5px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .nav-hamburger:focus-visible {
+      outline: 1px solid rgba(201, 168, 76, 0.6);
+      outline-offset: 4px;
     }
 
     .nav-hamburger span {
@@ -2361,6 +2380,8 @@
         gap: 2.2rem;
         z-index: 490;
         padding: 5rem 2rem 3rem;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
       }
 
       .nav-links.open {
@@ -3055,9 +3076,10 @@
       <li><a href="#gallery">Gallery</a></li>
       <li><a href="#contact">Contact</a></li>
     </ul>
-    <div class="nav-hamburger" onclick="toggleMenu()" aria-label="Menu">
+    <button class="nav-hamburger" id="nav-hamburger" type="button" onclick="toggleMenu()" aria-label="Menu"
+      aria-controls="nav-links" aria-expanded="false">
       <span></span><span></span><span></span>
-    </div>
+    </button>
   </nav>
 
   <!-- =========================================================
@@ -3791,20 +3813,65 @@
       document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 60);
     }, { passive: true });
 
-    // ===== MOBILE MENU (with scroll lock + hamburger X) =====
-    function toggleMenu() {
-      const links = document.getElementById('nav-links');
-      const burger = document.querySelector('.nav-hamburger');
-      const isOpen = links.classList.toggle('open');
-      burger.classList.toggle('active', isOpen);
-      document.body.style.overflow = isOpen ? 'hidden' : '';
+    // ===== MOBILE MENU + SCROLL LOCK (all devices) =====
+    const navLinks = document.getElementById('nav-links');
+    const navBurger = document.getElementById('nav-hamburger');
+    var bodyLockState = { menu: false, lightbox: false };
+    var savedScrollY = 0;
+
+    function applyBodyLock() {
+      var shouldLock = bodyLockState.menu || bodyLockState.lightbox;
+      if (shouldLock) {
+        if (!document.body.classList.contains('scroll-lock')) {
+          savedScrollY = window.scrollY || window.pageYOffset || 0;
+          document.body.classList.add('scroll-lock');
+          document.body.style.top = '-' + savedScrollY + 'px';
+        }
+      } else if (document.body.classList.contains('scroll-lock')) {
+        document.body.classList.remove('scroll-lock');
+        document.body.style.top = '';
+        window.scrollTo(0, savedScrollY);
+      }
     }
+
+    function setBodyLock(key, value) {
+      bodyLockState[key] = !!value;
+      applyBodyLock();
+    }
+
+    function closeMenu() {
+      if (!navLinks || !navBurger) return;
+      navLinks.classList.remove('open');
+      navBurger.classList.remove('active');
+      navBurger.setAttribute('aria-expanded', 'false');
+      setBodyLock('menu', false);
+    }
+
+    function openMenu() {
+      if (!navLinks || !navBurger) return;
+      navLinks.classList.add('open');
+      navBurger.classList.add('active');
+      navBurger.setAttribute('aria-expanded', 'true');
+      setBodyLock('menu', true);
+    }
+
+    function toggleMenu() {
+      if (!navLinks) return;
+      if (navLinks.classList.contains('open')) closeMenu();
+      else openMenu();
+    }
+
     // Close on link click
-    document.querySelectorAll('#nav-links a').forEach(a => a.addEventListener('click', () => {
-      document.getElementById('nav-links').classList.remove('open');
-      document.querySelector('.nav-hamburger').classList.remove('active');
-      document.body.style.overflow = '';
-    }));
+    document.querySelectorAll('#nav-links a').forEach(a => a.addEventListener('click', closeMenu));
+    // Close when tapping the dark backdrop area
+    if (navLinks) {
+      navLinks.addEventListener('click', function (e) { if (e.target === navLinks) closeMenu(); });
+    }
+    // Escape closes menu
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+    // Ensure desktop resize never leaves mobile menu lock active
+    window.addEventListener('resize', function () { if (window.innerWidth > 768) closeMenu(); }, { passive: true });
+    window.addEventListener('orientationchange', closeMenu, { passive: true });
 
     // ===== SCROLL ANIMATIONS =====
     const observer = new IntersectionObserver((entries) => {
@@ -3907,9 +3974,9 @@
         lbImg.src = images[idx].url;
         lbCounter.textContent = (idx + 1) + ' / ' + images.length;
         lb.classList.add('open');
-        document.body.style.overflow = 'hidden';
+        setBodyLock('lightbox', true);
       }
-      function closeLightbox() { lb.classList.remove('open'); document.body.style.overflow = ''; }
+      function closeLightbox() { lb.classList.remove('open'); setBodyLock('lightbox', false); }
       document.getElementById('lb-close').addEventListener('click', closeLightbox);
       lb.addEventListener('click', function (e) { if (e.target === lb) closeLightbox(); });
       document.getElementById('lb-prev').addEventListener('click', function (e) { e.stopPropagation(); if (!images.length) return; openLightbox((current - 1 + images.length) % images.length); });
@@ -3934,6 +4001,22 @@
       var LS_HIDE_KEY_V = 'ss_hidden_video_' + CLOUD_NAME + '_' + TAG;
       function withCacheBust(url) {
         return url + (url.indexOf('?') === -1 ? '?' : '&') + 'cb=' + Date.now();
+      }
+      function fetchFromSecureApi() {
+        function parseResponse(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        }
+        function normalize(data) {
+          var photos = Array.isArray(data && data.photos) ? data.photos.filter(Boolean) : [];
+          var videos = Array.isArray(data && data.videos) ? data.videos.filter(Boolean) : [];
+          return { photos: photos, videos: videos };
+        }
+        var q = '?tag=' + encodeURIComponent(TAG);
+        return fetch('/.netlify/functions/gallery' + q, { cache: 'no-store' })
+          .then(parseResponse)
+          .catch(function () { return fetch('/api/gallery' + q, { cache: 'no-store' }).then(parseResponse); })
+          .then(normalize);
       }
       function getCachedIds(key) {
         try {
@@ -4003,50 +4086,85 @@
         empty.innerHTML = '<div style="text-align:center;padding:2.5rem 1rem;">' +
           '<div style="font-size:2.5rem;margin-bottom:1rem;">&#9881;</div>' +
           '<p style="color:#C9A84C;font-size:0.92rem;margin-bottom:0.8rem;letter-spacing:0.1em;"><strong>One-time Gallery Setup Required</strong></p>' +
-          '<p style="color:#888;font-size:0.78rem;line-height:2;max-width:400px;margin:0 auto;text-align:left;">' +
-          '1. Log in to <strong style="color:#C9A84C">cloudinary.com</strong><br>' +
-          '2. Go to <strong style="color:#fff">Settings &#8594; Security</strong><br>' +
-          '3. Tick <strong style="color:#fff">"Resource list"</strong> checkbox &#10003;<br>' +
-          '4. Click <strong style="color:#fff">Save</strong><br><br>' +
-          '<em style="color:#555;">Then reload this page &mdash; your uploaded photos will appear automatically.</em>' +
+          '<p style="color:#888;font-size:0.78rem;line-height:2;max-width:420px;margin:0 auto;text-align:left;">' +
+          '<strong style="color:#fff">Enable Cloudinary Resource List (free, 1 minute):</strong><br>' +
+          '1. Go to <strong style="color:#C9A84C">cloudinary.com</strong> and log in<br>' +
+          '2. Click <strong style="color:#fff">Settings</strong> (top right)<br>' +
+          '3. Go to <strong style="color:#fff">Security</strong> tab<br>' +
+          '4. Under "Restricted media types", find <strong style="color:#fff">"Resource list"</strong><br>' +
+          '5. <strong style="color:#fff">Uncheck</strong> it and click <strong style="color:#fff">Save</strong><br>' +
+          '6. Reload this page — photos will appear automatically.<br><br>' +
+          '<em style="color:#555;">This allows the website to read your uploaded photos. Your images remain private — only the tag list is readable.</em>' +
           '</p></div>';
       }
 
-      // Strategy 1: Cloudinary tag endpoint
-      fetch(withCacheBust('https://res.cloudinary.com/' + CLOUD_NAME + '/image/list/' + TAG + '.json'))
-        .then(function (r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.json();
-        })
-        .then(function (data) {
-          var photoIds = filterHidden(mergePublicIds(data.resources || [], getCachedIds(LS_KEY)), LS_HIDE_KEY);
+      // Strategy 1: Netlify / server-side secure API (optional, skip fast if not available)
+      var secureApiFailed = false;
+      var secureApiPromise = fetchFromSecureApi()
+        .then(function (payload) {
+          var photoIds = filterHidden(payload.photos || [], LS_HIDE_KEY);
+          var videoIds = filterHidden(payload.videos || [], LS_HIDE_KEY_V);
           var resources = photoIds.map(function (pid) { return { public_id: pid, resource_type: 'image' }; });
-          // Keep cache in oldest -> newest order so admin/index can both reverse for recent-first view
+          videoIds.forEach(function (pid) { resources.push({ public_id: pid, resource_type: 'video' }); });
           try { localStorage.setItem(LS_KEY, JSON.stringify(photoIds.slice().reverse())); } catch (e) { }
-          // Also try video tag fetch
-          fetch(withCacheBust('https://res.cloudinary.com/' + CLOUD_NAME + '/video/list/' + TAG + '.json'))
-            .then(function (r2) {
-              if (!r2.ok) throw new Error('HTTP ' + r2.status);
-              return r2.json();
-            })
-            .then(function (vdata) {
-              var videoIds = filterHidden(mergePublicIds(vdata.resources || [], getCachedIds(LS_KEY_V)), LS_HIDE_KEY_V);
-              var vresources = videoIds.map(function (pid) { return { public_id: pid, resource_type: 'video' }; });
-              try { localStorage.setItem(LS_KEY_V, JSON.stringify(videoIds.slice().reverse())); } catch (e) { }
-              showGallery(resources.concat(vresources));
-            }).catch(function () {
-              var cachedVideoIds = filterHidden(getCachedIds(LS_KEY_V), LS_HIDE_KEY_V).slice().reverse();
-              var cachedVideos = cachedVideoIds.map(function (pid) { return { public_id: pid, resource_type: 'video' }; });
-              showGallery(resources.concat(cachedVideos));
-            });
+          try { localStorage.setItem(LS_KEY_V, JSON.stringify(videoIds.slice().reverse())); } catch (e) { }
+          if (resources.length > 0) { showGallery(resources); return 'done'; }
+          return 'empty';
         })
-        .catch(function () {
-          // Strategy 2: localStorage cache from admin uploads
-          if (!loadFromLocalStorage()) {
-            // Strategy 3: friendly setup error
-            showSetupError();
-          }
-        });
+        .catch(function () { secureApiFailed = true; return 'failed'; });
+
+      secureApiPromise.then(function (result) {
+        if (result === 'done') return; // already rendered
+
+        // Strategy 2: Public Cloudinary tag-list endpoint
+        // ⚠️  Requires "Resource List" to be ENABLED in:
+        //     Cloudinary → Settings → Security → uncheck "Resource list"
+        var imgUrl = withCacheBust('https://res.cloudinary.com/' + CLOUD_NAME + '/image/list/' + TAG + '.json');
+        var vidUrl = withCacheBust('https://res.cloudinary.com/' + CLOUD_NAME + '/video/list/' + TAG + '.json');
+
+        fetch(imgUrl)
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (data) {
+            var photoIds = filterHidden(mergePublicIds(data.resources || [], getCachedIds(LS_KEY)), LS_HIDE_KEY);
+            try { localStorage.setItem(LS_KEY, JSON.stringify(photoIds.slice().reverse())); } catch (e) { }
+            var resources = photoIds.map(function (pid) { return { public_id: pid, resource_type: 'image' }; });
+
+            fetch(vidUrl)
+              .then(function (r2) {
+                if (!r2.ok) throw new Error('HTTP ' + r2.status);
+                return r2.json();
+              })
+              .then(function (vdata) {
+                var videoIds = filterHidden(mergePublicIds(vdata.resources || [], getCachedIds(LS_KEY_V)), LS_HIDE_KEY_V);
+                try { localStorage.setItem(LS_KEY_V, JSON.stringify(videoIds.slice().reverse())); } catch (e) { }
+                var vresources = videoIds.map(function (pid) { return { public_id: pid, resource_type: 'video' }; });
+                var all = resources.concat(vresources);
+                if (all.length > 0) { showGallery(all); return; }
+                if (result === 'empty') {
+                  loading.style.display = 'none';
+                  empty.style.display = 'block';
+                  empty.textContent = 'No media uploaded yet.';
+                } else {
+                  if (!loadFromLocalStorage()) { showSetupError(); }
+                }
+              })
+              .catch(function () {
+                // video list failed — show photos only
+                if (resources.length > 0) { showGallery(resources); return; }
+                if (!loadFromLocalStorage()) { showSetupError(); }
+              });
+          })
+          .catch(function () {
+            // Strategy 3: localStorage cache (same browser as admin)
+            if (!loadFromLocalStorage()) {
+              // Strategy 4: friendly setup error
+              showSetupError();
+            }
+          });
+      });
     })();
 
     function sendWA() {
