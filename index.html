@@ -2700,8 +2700,9 @@
       line-height: 1.8;
     }
 
+    /* ── Gallery Video: adaptive aspect ratio ────────────────── */
     .gallery-video-wrap {
-      max-width: 900px;
+      max-width: 980px;
       margin: 0 auto 4rem;
     }
 
@@ -2715,6 +2716,90 @@
       margin-bottom: 1.2rem;
     }
 
+    /* Videos strip — horizontal scroll when multiple */
+    .gallery-videos-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      margin: 0 auto 4rem;
+      max-width: 1350px;
+      padding: 0 1rem;
+    }
+
+    /* Each video card auto-sizes by orientation */
+    .gallery-video-card {
+      position: relative;
+      background: #070d14;
+      border: 1px solid rgba(201, 168, 76, 0.22);
+      overflow: hidden;
+      border-radius: 2px;
+      transition: border-color 0.4s, box-shadow 0.4s;
+      flex-shrink: 0;
+    }
+
+    .gallery-video-card:hover {
+      border-color: rgba(201, 168, 76, 0.55);
+      box-shadow: 0 0 30px rgba(201, 168, 76, 0.12);
+    }
+
+    /* Landscape 16:9 — fits most row width */
+    .gallery-video-card.landscape {
+      width: min(780px, 100%);
+    }
+    .gallery-video-card.landscape .video-ratio-box {
+      padding-bottom: 56.25%; /* 16:9 */
+    }
+
+    /* Portrait 9:16 — narrow tall card */
+    .gallery-video-card.portrait {
+      width: min(310px, 100%);
+    }
+    .gallery-video-card.portrait .video-ratio-box {
+      padding-bottom: 177.78%; /* 9:16 */
+    }
+
+    /* Square or unknown */
+    .gallery-video-card.square {
+      width: min(540px, 100%);
+    }
+    .gallery-video-card.square .video-ratio-box {
+      padding-bottom: 100%;
+    }
+
+    .video-ratio-box {
+      position: relative;
+      height: 0;
+      overflow: hidden;
+    }
+
+    .video-ratio-box video {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      /* contain = no crop, letterbox with dark bg */
+      object-fit: contain;
+      background: #000;
+    }
+
+    /* Video badge label */
+    .vid-badge {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: rgba(0,0,0,0.65);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(201,168,76,0.35);
+      padding: 4px 10px;
+      font-family: 'Cinzel', serif;
+      font-size: 0.52rem;
+      letter-spacing: 0.28em;
+      color: var(--gold);
+      text-transform: uppercase;
+      z-index: 3;
+      border-radius: 2px;
+    }
+
+    /* Legacy single-video inner kept for placeholder */
     .gallery-video-inner {
       position: relative;
       padding-bottom: 56.25%;
@@ -2723,15 +2808,13 @@
       background: #070d14;
       border: 1px solid rgba(201, 168, 76, 0.22);
     }
-
     .gallery-video-inner video,
     .gallery-video-inner iframe {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      background: #000;
     }
 
     .gallery-video-placeholder {
@@ -2965,12 +3048,18 @@
         margin-bottom: 6px;
       }
 
-      .lb-prev {
-        left: 0.4rem;
-      }
+      .lb-prev { left: 0.4rem; }
+      .lb-next { right: 0.4rem; }
 
-      .lb-next {
-        right: 0.4rem;
+      /* Stack video cards on mobile */
+      .gallery-video-card.landscape,
+      .gallery-video-card.portrait,
+      .gallery-video-card.square {
+        width: 100%;
+      }
+      .gallery-videos-strip {
+        flex-direction: column;
+        padding: 0;
       }
     }
 
@@ -2979,7 +3068,6 @@
         columns: 2;
         column-gap: 4px;
       }
-
       .gallery-item {
         margin-bottom: 4px;
       }
@@ -3600,19 +3688,10 @@
         of Daman.</p>
     </div>
 
-    <!-- VIDEO -->
-    <div class="gallery-video-wrap fi" id="gallery-video-section" style="display:none;">
-      <p class="gallery-video-label">★ Featured Film ★</p>
-      <div class="gallery-video-inner" id="gallery-video-container">
-        <div class="gallery-video-placeholder" id="gallery-video-placeholder">
-          <div class="gvp-icon">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </div>
-          <p>No video uploaded yet</p>
-        </div>
-      </div>
+    <!-- VIDEOS STRIP — portrait & landscape adaptive -->
+    <div class="fi" id="gallery-video-section" style="display:none;">
+      <p class="gallery-video-label">★ Featured Films ★</p>
+      <div class="gallery-videos-strip" id="gallery-video-container"></div>
     </div>
 
     <!-- PHOTO GRID -->
@@ -3918,32 +3997,91 @@
       var images = [];
       var current = 0;
 
+      /* ── Aspect-ratio-aware video renderer ──────────────────── */
+      function buildVideoCard(v, idx) {
+        var url = 'https://res.cloudinary.com/' + CLOUD_NAME + '/video/upload/f_auto,q_auto:best,dpr_auto,w_1920,c_limit/' + v.public_id;
+        var poster = 'https://res.cloudinary.com/' + CLOUD_NAME + '/video/upload/f_auto,so_0/' + v.public_id + '.jpg';
+
+        // Temporary hidden video to probe dimensions
+        var probe = document.createElement('video');
+        probe.preload = 'metadata';
+        probe.style.cssText = 'position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;';
+        document.body.appendChild(probe);
+
+        // Outer card — class set after orientation detected
+        var card = document.createElement('div');
+        card.className = 'gallery-video-card'; // updated on loadedmetadata
+        card.innerHTML =
+          '<span class="vid-badge">&#9654; Film ' + (idx + 1) + '</span>' +
+          '<div class="video-ratio-box">' +
+          '<video src="' + url + '" controls playsinline preload="metadata" poster="' + poster + '"></video>' +
+          '</div>';
+
+        var realVid = card.querySelector('video');
+
+        function applyOrientation(w, h) {
+          var ratio = w / h;
+          if (ratio > 1.1) {
+            card.classList.add('landscape');
+          } else if (ratio < 0.91) {
+            card.classList.add('portrait');
+          } else {
+            card.classList.add('square');
+          }
+          probe.remove();
+        }
+
+        // Use probe element so the real player isn't affected during detection
+        probe.addEventListener('loadedmetadata', function () {
+          applyOrientation(probe.videoWidth, probe.videoHeight);
+        }, { once: true });
+        probe.addEventListener('error', function () {
+          card.classList.add('landscape'); // safe fallback
+          probe.remove();
+        }, { once: true });
+        probe.src = url;
+
+        // Also handle if real video fires first (cached)
+        realVid.addEventListener('loadedmetadata', function () {
+          if (!card.classList.contains('landscape') &&
+              !card.classList.contains('portrait') &&
+              !card.classList.contains('square')) {
+            applyOrientation(realVid.videoWidth, realVid.videoHeight);
+          }
+        }, { once: true });
+
+        // Hide card on fatal error
+        realVid.addEventListener('error', function () {
+          addIdToLS(LS_HIDE_KEY_V, v.public_id);
+          removeIdFromLS(LS_KEY_V, v.public_id);
+          card.remove();
+          if (!videoCont.querySelector('.gallery-video-card')) {
+            videoSec.style.display = 'none';
+          }
+        }, { once: true });
+
+        return card;
+      }
+
       function showGallery(resources) {
         loading.style.display = 'none';
         var photos = resources.filter(function (r) { return r.resource_type === 'image'; });
         var videos = resources.filter(function (r) { return r.resource_type === 'video'; });
 
-        // Video
+        // ── Videos (all, with adaptive portrait/landscape sizing) ──
         if (videos.length > 0) {
-          var v = videos[0];
-          var url = 'https://res.cloudinary.com/' + CLOUD_NAME + '/video/upload/f_auto,q_auto:best,dpr_auto,w_3840,c_limit/' + v.public_id;
-          videoCont.innerHTML = '<video src="' + url + '" controls playsinline preload="metadata" poster="' +
-            'https://res.cloudinary.com/' + CLOUD_NAME + '/video/upload/f_auto,q_auto:best,dpr_auto,w_1920,c_limit,so_0/' + v.public_id + '.jpg' + '"></video>';
-          var videoEl = videoCont.querySelector('video');
-          if (videoEl) {
-            videoEl.addEventListener('error', function () {
-              addIdToLS(LS_HIDE_KEY_V, v.public_id);
-              removeIdFromLS(LS_KEY_V, v.public_id);
-              videoSec.style.display = 'none';
-              videoCont.innerHTML = '';
-            }, { once: true });
-          }
+          videoCont.innerHTML = '';
+          videos.forEach(function (v, i) {
+            videoCont.appendChild(buildVideoCard(v, i));
+          });
           videoSec.style.display = 'block';
+          observer.observe(videoSec);
+          videoSec.classList.add('fi');
         } else {
           videoSec.style.display = 'none';
         }
 
-        // Photos
+        // ── Photos ──
         if (photos.length === 0) { empty.style.display = 'block'; return; }
         images = photos.map(function (r) {
           return {
@@ -3964,7 +4102,6 @@
           el.addEventListener('click', function () { openLightbox(parseInt(el.dataset.index)); });
         });
         bindGalleryImageErrors();
-        // Re-run scroll observer for new items
         grid.querySelectorAll('.gallery-item').forEach(function (el) { observer.observe(el); el.classList.add('fi'); });
       }
 
